@@ -1,0 +1,128 @@
+name: build and release
+
+on:
+    workflow_dispatch:
+
+permissions:
+    contents: write
+
+env:
+    ARCH: riscv
+    CROSS_COMPILE: riscv64-linux-gnu-
+
+jobs:
+    kernel:
+        runs-on: ubuntu-latest
+        steps:
+            - name: checkout
+              uses: actions/checkout@v4
+
+            - name: make build dir
+              run: mkdir build
+
+            - name: get kernel
+              working-directory: build
+              run: $GITHUB_WORKSPACE/kernel/script/get-kernel.sh
+
+            - name: install dependency
+              run: $GITHUB_WORKSPACE/kernel/script/install-dependency.sh
+
+            - name: configure kernel
+              working-directory: build/kernel
+              run: $GITHUB_WORKSPACE/kernel/script/configure-kernel.sh
+
+            - name: compile kernel
+              working-directory: build/kernel
+              run: $GITHUB_WORKSPACE/kernel/script/compile-kernel.sh
+
+            - name: upload kernel artifact
+              uses: actions/upload-artifact@v4
+              with:
+                  name: kernel
+                  path: |
+                      build/kernel/kernel.bin
+                      build/kernel/kernel.config
+
+            - name: upload config tool
+              uses: actions/upload-artifact@v4
+              with:
+                  name: config-tool
+                  path: build/kernel/scripts/config
+
+    rootfs:
+        needs: [kernel]
+        runs-on: ubuntu-latest
+        steps:
+            - name: checkout
+              uses: actions/checkout@v4
+
+            - name: make build dir
+              run: mkdir build
+
+            - name: get busybox
+              working-directory: build
+              run: $GITHUB_WORKSPACE/rootfs/script/get-busybox.sh
+
+            - name: setup go
+              uses: actions/setup-go@v6
+              with:
+                  go-version: '1.26'
+
+            - name: install dependency
+              run: $GITHUB_WORKSPACE/rootfs/script/install-dependency.sh
+
+            - name: download config tool
+              uses: actions/download-artifact@v4
+              with:
+                  name: config-tool
+                  path: build/rootfs/scripts
+
+            - name: configure busybox
+              working-directory: build/rootfs
+              run: $GITHUB_WORKSPACE/rootfs/script/configure-busybox.sh
+
+            - name: compile busybox
+              working-directory: build/rootfs
+              run: $GITHUB_WORKSPACE/rootfs/script/compile-busybox.sh
+
+            - name: configure rootfs
+              working-directory: build/rootfs/_install
+              run: $GITHUB_WORKSPACE/rootfs/script/configure-rootfs.sh
+
+            - name: create rootfs
+              working-directory: build/rootfs
+              run: $GITHUB_WORKSPACE/rootfs/script/create-rootfs.sh
+
+            - name: upload rootfs artifact
+              uses: actions/upload-artifact@v4
+              with:
+                  name: rootfs
+                  path: |
+                      build/rootfs/rootfs.ext4
+                      build/rootfs/rootfs.config
+
+    release:
+        needs: [kernel, rootfs]
+        runs-on: ubuntu-latest
+        steps:
+            - name: download kernel artifact
+              uses: actions/download-artifact@v4
+              with:
+                  name: kernel
+                  path: artifacts
+
+            - name: download rootfs artifact
+              uses: actions/download-artifact@v4
+              with:
+                  name: rootfs
+                  path: artifacts
+
+            - name: create timestamp tag
+              id: timestamp
+              run: echo "TAG=$(date +'%Y%m%d-%H%M%S')" >> $GITHUB_OUTPUT
+
+            - name: create release
+              uses: softprops/action-gh-release@v1
+              with:
+                  tag_name: ${{ steps.timestamp.outputs.TAG }}
+                  files: artifacts/*
