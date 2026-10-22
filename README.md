@@ -2,6 +2,12 @@
 
 tiny riscv64 linux
 
+## requirements
+
+QEMU emulator version 10.2.1 or later
+
+## quick start
+
 ```shell
 rm -rf test
 mkdir test && cd test
